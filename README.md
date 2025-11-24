@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+DS Dashboard – Graduation Project (Pharos University)
 
-## Getting Started
+This repository contains the Frontend (Next.js) for our Graduation Project at Pharos University – Computer Science Department.
 
-First, run the development server:
+📌 Project Structure
+IDS_APP/
+│── app/          → Frontend (Next.js UI)
+│── backend/      → Backend team workspace (Node.js)
+│── public/
+│── package.json
 
-```bash
+🚀 Frontend Setup
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Runs on:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+http://localhost:3000
 
-## Learn More
+🧩 Backend (Node.js Team)
 
-To learn more about Next.js, take a look at the following resources:
+Work inside:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+/backend
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-## Deploy on Vercel
+Backend should create these endpoints to match the frontend:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+POST /predict
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+POST /upload-dataset
+
+GET /monitor/start
+
+GET /monitor/stop
+
+👥 Team Workflow
+
+Frontend members work inside /app
+
+Backend members work inside /backend
+
+Each member uses their own branch → push → pull request → merge into main
