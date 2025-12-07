@@ -1,2 +1,5 @@
-worrk here yaa waa77ed
+cd E:\ids_app\backend
+.\.venv\Scripts\activate
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
 

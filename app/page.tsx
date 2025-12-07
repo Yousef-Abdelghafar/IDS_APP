@@ -3,7 +3,7 @@
 import React, { useState, useRef } from "react";
 
 const API_URL = "http://127.0.0.1:8000/predict";
-const UPLOAD_URL = "http://127.0.0.1:8000/upload-dataset";
+const UPLOAD_URL = "http://127.0.0.1:8000/upload-dataset/"; // <= note the trailing slash
 
 type RiskLevel = "High" | "Medium" | "Low";
 type UploadMode = "train" | "test";
@@ -418,6 +418,7 @@ function DashboardView({
                   d="M260 110 C300 120 320 90 350 60"
                   className="stroke-fuchsia-400/90 stroke-[2.1] fill-none"
                 />
+
                 <circle cx="60" cy="60" r="7.5" className="fill-cyan-300" />
                 <circle cx="60" cy="140" r="7.5" className="fill-cyan-300" />
                 <circle cx="210" cy="90" r="10" className="fill-emerald-400" />
