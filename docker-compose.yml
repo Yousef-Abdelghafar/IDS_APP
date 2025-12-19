@@ -1,0 +1,16 @@
+services:
+  ids-backend:
+    build: ./backend
+    container_name: ids-backend
+    ports:
+      - "8000:8000"
+
+  traffic-generator:
+    build: ./generator
+    container_name: traffic-generator
+    depends_on:
+      - ids-backend
+    volumes:
+      - ./backend/models/feature_names.json:/app/feature_names.json:ro
+
+
