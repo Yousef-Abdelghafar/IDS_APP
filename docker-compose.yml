@@ -4,13 +4,17 @@ services:
     container_name: ids-backend
     ports:
       - "8000:8000"
+    environment:
+      - TRAFFIC_SOURCE=generator
 
   traffic-generator:
     build: ./generator
     container_name: traffic-generator
     depends_on:
       - ids-backend
+    environment:
+      - API_BASE=http://ids-backend:8000
+      - INTERVAL=1.0
+      - FEATURES_PATH=/app/feature_names.json
     volumes:
       - ./backend/models/feature_names.json:/app/feature_names.json:ro
-
-

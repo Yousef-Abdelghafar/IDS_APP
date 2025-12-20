@@ -9,8 +9,17 @@ const API_STATS = `${BASE_URL}/stats`;
 const API_STATS_RESET = `${BASE_URL}/stats/reset`;
 const API_MONITOR_START = `${BASE_URL}/monitor/start`;
 const API_MONITOR_STOP = `${BASE_URL}/monitor/stop`;
-const API_UPLOAD = `${BASE_URL}/upload-dataset/`;
+const API_MONITOR_STATUS = `${BASE_URL}/monitor/status`;
+
+const API_UPLOAD = `${BASE_URL}/upload-dataset/`; // info only (rows/cols)
 const API_RECENT_ALERTS = `${BASE_URL}/recent/alerts?limit=10`;
+
+// ✅ new for dataset test
+const API_DATASET_TEST = `${BASE_URL}/dataset/test`;
+const API_DATASET_TEST_STATUS = `${BASE_URL}/dataset/test/status`;
+
+// (optional visibility)
+const API_SOURCE_STATUS = `${BASE_URL}/source/status`;
 
 type PageId = "dashboard" | "live" | "alerts" | "model" | "dataset" | "predict";
 type RiskLevel = "High" | "Medium" | "Low";
@@ -44,6 +53,39 @@ type AlertItem = {
 type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: string; status?: number };
+
+type MonitorStatusResponse = {
+  running?: boolean;
+  started_at?: string | null;
+  stopped_at?: string | null;
+  [key: string]: any;
+};
+
+type SourceStatusResponse = {
+  source?: "generator" | "dataset" | string;
+};
+
+type DatasetTestStartResponse = {
+  status: string;
+  job_id: string;
+  rows_detected: number;
+  max_rows: number;
+  sleep_ms: number;
+};
+
+type DatasetTestJob = {
+  job_id: string;
+  type: string;
+  filename: string;
+  status: "queued" | "running" | "done" | "failed";
+  processed: number;
+  total: number;
+  benign: number;
+  attack: number;
+  message?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
 
 async function safeFetchJSON<T>(url: string, init?: RequestInit): Promise<ApiResult<T>> {
   try {
@@ -88,13 +130,7 @@ export default function Home() {
     }
   };
 
-  useEffect(() => {
-    fetchStats();
-    const id = setInterval(fetchStats, 2000);
-    return () => clearInterval(id);
-  }, []);
-
-  // ===== Recent Alerts (LIVE) =====
+  // ===== Recent Alerts =====
   const [recentAlerts, setRecentAlerts] = useState<AlertItem[]>([]);
   const [recentErr, setRecentErr] = useState<string | null>(null);
 
@@ -108,42 +144,93 @@ export default function Home() {
     }
   };
 
-  useEffect(() => {
-    fetchRecentAlerts();
-    const id = setInterval(fetchRecentAlerts, 2000);
-    return () => clearInterval(id);
-  }, []);
-
   // ===== Monitoring =====
   const [monitoring, setMonitoring] = useState(false);
   const [monitorStatus, setMonitorStatus] = useState<string | null>(null);
   const [monitorBusy, setMonitorBusy] = useState(false);
 
+  // ✅ Polling refs (علشان نقدر نوقفهم فعلياً)
+  const statsIntervalRef = useRef<number | null>(null);
+  const alertsIntervalRef = useRef<number | null>(null);
+
+  const stopPolling = () => {
+    if (statsIntervalRef.current) {
+      clearInterval(statsIntervalRef.current);
+      statsIntervalRef.current = null;
+    }
+    if (alertsIntervalRef.current) {
+      clearInterval(alertsIntervalRef.current);
+      alertsIntervalRef.current = null;
+    }
+  };
+
+  const startPolling = () => {
+    stopPolling();
+    fetchStats();
+    fetchRecentAlerts();
+    statsIntervalRef.current = window.setInterval(fetchStats, 2000);
+    alertsIntervalRef.current = window.setInterval(fetchRecentAlerts, 2000);
+  };
+
+  const syncMonitoringFromBackend = async () => {
+    const r = await safeFetchJSON<MonitorStatusResponse>(API_MONITOR_STATUS);
+    if (r.ok) {
+      const running = !!r.data.running;
+      setMonitoring(running);
+
+      if (running) {
+        startPolling();
+      } else {
+        stopPolling();
+        setRecentAlerts([]);
+      }
+    } else {
+      setMonitorStatus(`⚠️ Could not sync monitoring: ${r.error}`);
+    }
+  };
+
   const startMonitoring = async () => {
     setMonitorBusy(true);
     setMonitorStatus(null);
+
     const r = await safeFetchJSON<any>(API_MONITOR_START);
     if (r.ok) {
       setMonitoring(true);
       setMonitorStatus("✅ Monitoring started.");
+      startPolling();
     } else {
       setMonitorStatus(`❌ Start failed: ${r.error}`);
     }
+
     setMonitorBusy(false);
   };
 
   const stopMonitoring = async () => {
     setMonitorBusy(true);
     setMonitorStatus(null);
+
     const r = await safeFetchJSON<any>(API_MONITOR_STOP);
     if (r.ok) {
       setMonitoring(false);
       setMonitorStatus("✅ Monitoring stopped.");
+      stopPolling();
+      setRecentAlerts([]);
     } else {
       setMonitorStatus(`❌ Stop failed: ${r.error}`);
     }
+
     setMonitorBusy(false);
   };
+
+  // ✅ Initial load
+  useEffect(() => {
+    fetchStats();
+    fetchRecentAlerts();
+    syncMonitoringFromBackend();
+
+    return () => stopPolling();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ===== Reset Stats =====
   const [resetBusy, setResetBusy] = useState(false);
@@ -192,7 +279,7 @@ export default function Home() {
     if (r.ok) {
       setPrediction(r.data);
       await fetchStats();
-      await fetchRecentAlerts(); // ✅ عشان الجدول يتحدث فورًا
+      await fetchRecentAlerts();
     } else {
       setPredError(r.error);
     }
@@ -200,7 +287,7 @@ export default function Home() {
     setPredBusy(false);
   };
 
-  // ===== Upload =====
+  // ===== Upload (Info only) =====
   const [uploadMode, setUploadMode] = useState<UploadMode>("train");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
@@ -219,14 +306,14 @@ export default function Home() {
     setUploadMsg(f ? `Selected: ${f.name}` : "No file selected.");
   };
 
-  const uploadDataset = async () => {
+  const uploadDatasetInfo = async () => {
     if (!uploadFile) {
       setUploadMsg("❌ Select a file first.");
       return;
     }
 
     setUploadBusy(true);
-    setUploadMsg("⏳ Uploading...");
+    setUploadMsg("⏳ Uploading (info)...");
 
     try {
       const form = new FormData();
@@ -238,7 +325,7 @@ export default function Home() {
         throw new Error(t || `Upload failed (${res.status})`);
       }
       const data = await res.json();
-      setUploadMsg(`✅ Done. mode=${data.mode} rows=${data.rows ?? "?"} cols=${data.cols ?? "?"}`);
+      setUploadMsg(`✅ Info: mode=${data.mode} rows=${data.rows ?? "?"} cols=${data.cols ?? "?"}`);
     } catch (e: any) {
       setUploadMsg(`❌ ${e?.message || "Upload error"}`);
     } finally {
@@ -246,11 +333,99 @@ export default function Home() {
     }
   };
 
+  // ===== Dataset Test (Replay) =====
+  const [testMaxRows, setTestMaxRows] = useState<number>(500);
+  const [testSleepMs, setTestSleepMs] = useState<number>(0);
+  const [testBusy, setTestBusy] = useState(false);
+  const [testJobId, setTestJobId] = useState<string | null>(null);
+  const [testJob, setTestJob] = useState<DatasetTestJob | null>(null);
+  const testPollRef = useRef<number | null>(null);
+
+  const stopTestPolling = () => {
+    if (testPollRef.current) {
+      clearInterval(testPollRef.current);
+      testPollRef.current = null;
+    }
+  };
+
+  const fetchTestJob = async (jobId: string) => {
+    const r = await safeFetchJSON<DatasetTestJob>(`${API_DATASET_TEST_STATUS}?job_id=${encodeURIComponent(jobId)}`);
+    if (r.ok) {
+      setTestJob(r.data);
+      if (r.data.status === "done" || r.data.status === "failed") {
+        stopTestPolling();
+        setTestBusy(false);
+      }
+    } else {
+      setMonitorStatus(`❌ Test status error: ${r.error}`);
+      stopTestPolling();
+      setTestBusy(false);
+    }
+  };
+
+  const runDatasetTest = async () => {
+    if (!uploadFile) {
+      setUploadMsg("❌ Select a file first.");
+      return;
+    }
+    if (!monitoring) {
+      setMonitorStatus("⚠️ Start Monitoring first (required for replay).");
+      return;
+    }
+
+    setTestBusy(true);
+    setTestJob(null);
+    setTestJobId(null);
+    setMonitorStatus(null);
+
+    try {
+      const form = new FormData();
+      form.append("file", uploadFile);
+
+      const url = `${API_DATASET_TEST}?max_rows=${encodeURIComponent(String(testMaxRows))}&sleep_ms=${encodeURIComponent(
+        String(testSleepMs)
+      )}`;
+
+      const res = await fetch(url, { method: "POST", body: form });
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        throw new Error(t || `Dataset test failed (${res.status})`);
+      }
+      const data = (await res.json()) as DatasetTestStartResponse;
+      setTestJobId(data.job_id);
+      setMonitorStatus(`✅ Dataset Test started. job_id=${data.job_id}`);
+
+      // start polling job status
+      stopTestPolling();
+      await fetchTestJob(data.job_id);
+      testPollRef.current = window.setInterval(() => fetchTestJob(data.job_id), 1000);
+    } catch (e: any) {
+      setTestBusy(false);
+      setMonitorStatus(`❌ ${e?.message || "Dataset test error"}`);
+    }
+  };
+
+  // (optional) show source status
+  const [sourceInfo, setSourceInfo] = useState<string | null>(null);
+  const fetchSource = async () => {
+    const r = await safeFetchJSON<SourceStatusResponse>(API_SOURCE_STATUS);
+    if (r.ok) setSourceInfo(r.data.source ?? null);
+  };
+
+  useEffect(() => {
+    fetchSource();
+  }, []);
+
+  useEffect(() => {
+    return () => stopTestPolling();
+  }, []);
+
   const lastLabel = stats?.last_prediction?.label ?? "--";
   const lastProb =
-    stats?.last_prediction?.probability !== undefined
-      ? stats.last_prediction.probability.toFixed(4)
-      : "--";
+    stats?.last_prediction?.probability !== undefined ? stats.last_prediction.probability.toFixed(4) : "--";
+
+  const progressPct =
+    testJob && testJob.total > 0 ? Math.round((testJob.processed / testJob.total) * 100) : 0;
 
   return (
     <div className="min-h-screen bg-[#020014] text-slate-50">
@@ -271,6 +446,7 @@ export default function Home() {
                 <div className="text-lg font-semibold tracking-tight">Intrusion Detection Dashboard</div>
                 <div className="text-[0.7rem] text-slate-400">
                   Backend: <span className="text-slate-200">{BASE_URL}</span>
+                  {sourceInfo ? <span className="ml-2 text-slate-500">source: {sourceInfo}</span> : null}
                 </div>
               </div>
             </div>
@@ -350,8 +526,16 @@ export default function Home() {
             <section className="flex-1">
               <div className="mb-5 grid gap-3 sm:grid-cols-3">
                 <MetricTile label="Total Flows" value={stats ? String(stats.total) : "--"} accent="fuchsia" />
-                <MetricTile label="BENIGN" value={stats ? `${stats.benign} (${stats.benign_pct}%)` : "--"} accent="cyan" />
-                <MetricTile label="ATTACK" value={stats ? `${stats.attack} (${stats.attack_pct}%)` : "--"} accent="emerald" />
+                <MetricTile
+                  label="BENIGN"
+                  value={stats ? `${stats.benign} (${stats.benign_pct}%)` : "--"}
+                  accent="cyan"
+                />
+                <MetricTile
+                  label="ATTACK"
+                  value={stats ? `${stats.attack} (${stats.attack_pct}%)` : "--"}
+                  accent="emerald"
+                />
               </div>
 
               {statsErr && <Notice tone="warn">Stats fetch warning: {statsErr}</Notice>}
@@ -369,16 +553,21 @@ export default function Home() {
                           label={monitoring ? "Monitoring Active" : "Start Monitoring"}
                         />
                         <GhostBtn onClick={stopMonitoring} disabled={monitorBusy || !monitoring} label="Stop Monitoring" />
-                        <DangerBtn onClick={resetStats} disabled={resetBusy} label={resetBusy ? "Resetting..." : "Reset Stats"} />
+                        <DangerBtn
+                          onClick={resetStats}
+                          disabled={resetBusy}
+                          label={resetBusy ? "Resetting..." : "Reset Stats"}
+                        />
                       </div>
                     </NeonCard>
 
-                    {/* ✅ Live Table */}
                     <NeonCard title="Recent Alerts (LIVE)" rightLabel="from /recent/alerts">
-                      {recentAlerts.length === 0 ? (
+                      {!monitoring ? (
                         <div className="text-xs text-slate-400">
-                          No alerts yet. (Generate more traffic or increase attack ratio)
+                          Monitoring is paused. Start monitoring to see live alerts.
                         </div>
+                      ) : recentAlerts.length === 0 ? (
+                        <div className="text-xs text-slate-400">No alerts yet.</div>
                       ) : (
                         <div className="overflow-x-auto text-xs">
                           <table className="w-full text-left">
@@ -415,7 +604,7 @@ export default function Home() {
                       <div className="flex flex-wrap gap-2">
                         <PrimaryBtn onClick={() => setActivePage("predict")} label="Go to Test API" />
                         <GhostBtn onClick={() => setActivePage("dataset")} label="Go to Dataset" />
-                        <GhostBtn onClick={fetchStats} label="Refresh Stats" />
+                        <GhostBtn onClick={() => (monitoring ? fetchStats() : syncMonitoringFromBackend())} label="Refresh" />
                       </div>
                     </NeonCard>
 
@@ -431,9 +620,9 @@ export default function Home() {
               )}
 
               {activePage === "dataset" && (
-                <NeonCard title="Dataset Manager" rightLabel="POST /upload-dataset/?mode=">
+                <NeonCard title="Dataset Manager" rightLabel="Upload info + Replay test">
                   <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="text-slate-400">Mode:</span>
+                    <span className="text-slate-400">Mode (info only):</span>
                     <button
                       type="button"
                       onClick={() => setUploadMode("train")}
@@ -461,11 +650,85 @@ export default function Home() {
                   </div>
 
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <PrimaryBtn onClick={chooseFile} disabled={uploadBusy} label="Select File" />
-                    <GhostBtn onClick={uploadDataset} disabled={uploadBusy} label={uploadBusy ? "Uploading..." : "Upload"} />
+                    <PrimaryBtn onClick={chooseFile} disabled={uploadBusy || testBusy} label="Select File" />
+                    <GhostBtn
+                      onClick={uploadDatasetInfo}
+                      disabled={uploadBusy || testBusy}
+                      label={uploadBusy ? "Uploading..." : "Upload Info"}
+                    />
                   </div>
 
-                  <input ref={fileRef} type="file" accept=".csv,.parquet,.json" className="hidden" onChange={onFileChange} />
+                  <div className="mt-4 grid gap-3 rounded-xl border border-slate-800 bg-black/60 p-3 text-xs">
+                    <div className="text-[0.72rem] text-slate-400">Dataset Test (Replay to Dashboard)</div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-slate-400">max_rows</span>
+                      <input
+                        className="w-28 rounded-lg border border-slate-700 bg-black px-2 py-1 text-slate-100 outline-none"
+                        type="number"
+                        value={testMaxRows}
+                        min={1}
+                        max={50000}
+                        onChange={(e) => setTestMaxRows(Number(e.target.value))}
+                      />
+                      <span className="text-slate-400">sleep_ms</span>
+                      <input
+                        className="w-28 rounded-lg border border-slate-700 bg-black px-2 py-1 text-slate-100 outline-none"
+                        type="number"
+                        value={testSleepMs}
+                        min={0}
+                        max={1000}
+                        onChange={(e) => setTestSleepMs(Number(e.target.value))}
+                      />
+                      <span className="text-slate-500">(use 50~200 for “real-time feel”)</span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <PrimaryBtn
+                        onClick={runDatasetTest}
+                        disabled={testBusy || uploadBusy}
+                        label={testBusy ? "Running Replay..." : "Run Dataset Test (Replay)"}
+                      />
+                      <GhostBtn onClick={fetchSource} disabled={false} label="Refresh Source" />
+                    </div>
+
+                    {testJobId && (
+                      <div className="text-slate-200">
+                        job_id: <span className="text-slate-100">{testJobId}</span>
+                      </div>
+                    )}
+
+                    {testJob && (
+                      <div className="rounded-xl border border-slate-800 bg-black/50 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-slate-200">
+                            Status: <span className="text-slate-100">{testJob.status}</span>
+                            {testJob.message ? <span className="ml-2 text-slate-400">({testJob.message})</span> : null}
+                          </div>
+                          <div className="text-slate-300">
+                            {testJob.processed}/{testJob.total} ({progressPct}%)
+                          </div>
+                        </div>
+                        <div className="mt-2 h-2 w-full rounded-full bg-slate-900">
+                          <div className="h-2 rounded-full bg-cyan-500" style={{ width: `${progressPct}%` }} />
+                        </div>
+                        <div className="mt-2 text-slate-300">
+                          benign: {testJob.benign} | attack: {testJob.attack}
+                        </div>
+                        <div className="mt-1 text-slate-500 text-[0.72rem]">
+                        
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept=".csv,.parquet,.json"
+                    className="hidden"
+                    onChange={onFileChange}
+                  />
 
                   {uploadMsg && (
                     <div className="mt-3 rounded-xl border border-slate-800 bg-black/60 p-3 text-xs text-slate-200">
@@ -485,8 +748,15 @@ export default function Home() {
                     spellCheck={false}
                   />
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <PrimaryBtn onClick={runPredict} disabled={predBusy} label={predBusy ? "Predicting..." : "Run Prediction"} />
-                    <GhostBtn onClick={fetchStats} label="Refresh Stats" />
+                    <PrimaryBtn
+                      onClick={runPredict}
+                      disabled={predBusy}
+                      label={predBusy ? "Predicting..." : "Run Prediction"}
+                    />
+                    <GhostBtn
+                      onClick={() => (monitoring ? fetchStats() : syncMonitoringFromBackend())}
+                      label="Refresh"
+                    />
                     <DangerBtn onClick={resetStats} disabled={resetBusy} label="Reset Stats" />
                   </div>
 
@@ -529,7 +799,15 @@ function NeonCard({ title, rightLabel, children }: { title: string; rightLabel?:
   );
 }
 
-function MetricTile({ label, value, accent }: { label: string; value: string; accent: "cyan" | "fuchsia" | "indigo" | "emerald" }) {
+function MetricTile({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent: "cyan" | "fuchsia" | "indigo" | "emerald";
+}) {
   const map: Record<string, string> = {
     cyan: "border-cyan-500/60 text-cyan-200",
     fuchsia: "border-fuchsia-500/60 text-fuchsia-200",
